@@ -23,7 +23,7 @@ type
     FIdSMTP: TIdSMTP;
     FIdSSLOpenSSL: TIdSSLIOHandlerSocketOpenSSL;
     FIdMessage: TIdMessage;
-    FidMessageBuilderHTML: TIdMessageBuilderHtml;
+    FIdMessageBuilderHTML: TIdMessageBuilderHtml;
     FSSL: Boolean;
     FTLS: Boolean;
     FLogExecute: TProc<string>;
@@ -60,7 +60,8 @@ type
     function Priority(const APriority: TPriority): TSendEmail;
     function Subject(const ASubject: string): TSendEmail;
     function Message(const AMessage: string; const IsBodyHTML: Boolean = True): TSendEmail;
-    function AddAttachment(const AFileName: string; const ADisposition: TAttachmentDisposition = adInline): TSendEmail;
+    function AddAttachment(const AFileName: string; const ADisposition: TAttachmentDisposition = adAttachment): TSendEmail; overload;
+    function AddAttachment(const AData: TStream; const AFileName: string; const ADisposition: TAttachmentDisposition = adAttachment): TSendEmail; overload;
     function Host(const AHost: string): TSendEmail;
     function Port(const APort: Integer): TSendEmail;
     function Auth(const AValue: Boolean): TSendEmail;
@@ -115,7 +116,7 @@ constructor TSendEmail.Create;
 begin
   FIdSMTP := TIdSMTP.Create;
   FIdSSLOpenSSL := TIdSSLIOHandlerSocketOpenSSL.Create;
-  FidMessageBuilderHTML := TIdMessageBuilderHtml.Create;
+  FIdMessageBuilderHTML := TIdMessageBuilderHtml.Create;
   FIdMessage := TIdMessage.Create;
   FMessageStream := TMemoryStream.Create;
 
@@ -139,11 +140,10 @@ begin
 
   with FIdSMTP do
   begin
-    MailAgent := 'SendEmail-https://github.com/dliocode/sendemail';
+    MailAgent := 'SendEmail';
     ConnectTimeout := 60000;
     ReadTimeout := 60000;
     UseEhlo := True;
-    HeloName := 'SendEmail-https://github.com/dliocode/sendemail';
     OnStatus := LogSMTPStatus;
     OnWorkBegin := WorkBegin;
     OnWork := Work;
@@ -180,7 +180,7 @@ begin
   FLogExecute := nil;
 
   FreeAndNil(FMessageStream);
-  FreeAndNil(FidMessageBuilderHTML);
+  FreeAndNil(FIdMessageBuilderHTML);
   FreeAndNil(FIdMessage);
   FreeAndNil(FIdSSLOpenSSL);
   FreeAndNil(FIdSMTP);
@@ -314,21 +314,21 @@ begin
 
   if IsBodyHTML then
   begin
-    FidMessageBuilderHTML.Html.Text := AMessage;
-    FidMessageBuilderHTML.HtmlCharSet := 'utf-8';
-    FidMessageBuilderHTML.HtmlContentTransfer := 'base64'; // quoted-printable
+    FIdMessageBuilderHTML.Html.Text := AMessage;
+    FIdMessageBuilderHTML.HtmlCharSet := 'utf-8';
+    FIdMessageBuilderHTML.HtmlContentTransfer := 'base64'; // quoted-printable
   end
   else
   begin
-    FidMessageBuilderHTML.PlainText.Text := AMessage;
-    FidMessageBuilderHTML.PlainTextCharSet := 'utf-8';
-    FidMessageBuilderHTML.PlainTextContentTransfer := 'base64'; // quoted-printable
+    FIdMessageBuilderHTML.PlainText.Text := AMessage;
+    FIdMessageBuilderHTML.PlainTextCharSet := 'utf-8';
+    FIdMessageBuilderHTML.PlainTextContentTransfer := 'base64'; // quoted-printable
   end;
 
   Log(Format('Message: %s', [IfThen(IsBodyHTML, 'HTML', 'PlainText')]));
 end;
 
-function TSendEmail.AddAttachment(const AFileName: string; const ADisposition: TAttachmentDisposition = adInline): TSendEmail;
+function TSendEmail.AddAttachment(const AFileName: string; const ADisposition: TAttachmentDisposition = adAttachment): TSendEmail;
 begin
   Result := Self;
 
@@ -337,22 +337,60 @@ begin
 
   if not FileExists(AFileName) then
   begin
-    Log('Attachment: Not found');
+    Log('Attachment: Not found - ' + ExtractFileName(AFileName));
     Exit;
   end;
 
   case ADisposition of
     adAttachment:
       begin
-        FidMessageBuilderHTML.Attachments.Add(AFileName);
-        Log(Format('Attachment(adAttachment)(%d): %s', [FidMessageBuilderHTML.Attachments.Count, ExtractFileName(AFileName)]));
+        FIdMessageBuilderHTML.Attachments.Add(AFileName);
+        Log(Format('Attachment(adAttachment)(%d): %s', [FIdMessageBuilderHTML.Attachments.Count, ExtractFileName(AFileName)]));
       end;
+
     adInline:
       begin
-        FidMessageBuilderHTML.HtmlFiles.Add(AFileName);
-        Log(Format('Attachment(adInline)(%d): %s', [FidMessageBuilderHTML.HtmlFiles.Count, ExtractFileName(AFileName)]));
+        FIdMessageBuilderHTML.HtmlFiles.Add(AFileName);
+        Log(Format('Attachment(adInline)(%d): %s', [FIdMessageBuilderHTML.HtmlFiles.Count, ExtractFileName(AFileName)]));
       end;
   end;
+end;
+
+function TSendEmail.AddAttachment(const AData: TStream; const AFileName: string; const ADisposition: TAttachmentDisposition = adAttachment): TSendEmail;
+var
+  LAdd: TIdMessageBuilderAttachment;
+begin
+  Result := Self;
+
+  if not Assigned(AData) then
+    Exit;
+
+  if AFileName.Trim.IsEmpty then
+    Exit;
+
+  AData.Position := 0;
+  LAdd := nil;
+
+  case ADisposition of
+    adAttachment:
+      begin
+        LAdd := FIdMessageBuilderHTML.Attachments.Add(AData, '', AFileName);
+        Log(Format('Attachment(adAttachment)(%d): %s', [FIdMessageBuilderHTML.Attachments.Count, ExtractFileName(AFileName)]));
+      end;
+
+    adInline:
+      begin
+        LAdd := FIdMessageBuilderHTML.HtmlFiles.Add(AData, '', AFileName);
+        Log(Format('Attachment(adInline)(%d): %s', [FIdMessageBuilderHTML.HtmlFiles.Count, ExtractFileName(AFileName)]));
+      end;
+  end;
+
+  if not Assigned(LAdd) then
+    Exit;
+
+  LAdd.FileName := AFileName;
+  LAdd.Name := ExtractFileName(AFileName);
+  LAdd.WantedFileName := ExtractFileName(AFileName);
 end;
 
 function TSendEmail.Host(const AHost: string): TSendEmail;
@@ -447,7 +485,7 @@ begin
   FIdMessage.ClearHeader;
   FIdMessage.Body.Clear;
   FIdMessage.MessageParts.Clear;
-  FidMessageBuilderHTML.Clear;
+  FIdMessageBuilderHTML.Clear;
 end;
 
 function TSendEmail.ClearRecipient: TSendEmail;
@@ -462,7 +500,7 @@ begin
   FIdMessage.BCCList.Clear;
   FIdMessage.Subject := '';
   FIdMessage.MessageParts.Clear;
-  FidMessageBuilderHTML.Clear;
+  FIdMessageBuilderHTML.Clear;
 end;
 
 function TSendEmail.Connect: TSendEmail;
@@ -487,23 +525,20 @@ begin
     Log('Loading DLL');
     if not LoadOpenSSLLibrary then
     begin
-      Log('DLL''s not compatible or not found (ssleay32 e libeay32)');
-      raise Exception.Create('DLL''s not compatible or not found (ssleay32 e libeay32)');
+      Log(WhichFailedToLoad);
+      raise Exception.Create(Self.ClassName + ' > ' + WhichFailedToLoad);
     end;
     Log('Loaded DLL');
 
-    with FIdSSLOpenSSL do
-    begin
-      if FSSL then
-        SSLOptions.Method := SslvSSLv23;
+    if FSSL then
+      FIdSSLOpenSSL.SSLOptions.Method := SslvSSLv23;
 
-      if FTLS then
-        SSLOptions.Method := SslvTLSv1_2;
+    if FTLS then
+      FIdSSLOpenSSL.SSLOptions.Method := SslvTLSv1_2;
 
-      Destination := FIdSMTP.Host + ':' + FIdSMTP.Port.ToString;
-      Host := FIdSMTP.Host;
-      Port := FIdSMTP.Port;
-    end;
+    FIdSSLOpenSSL.Destination := FIdSMTP.Host + ':' + FIdSMTP.Port.ToString;
+    FIdSSLOpenSSL.Host := FIdSMTP.Host;
+    FIdSSLOpenSSL.Port := FIdSMTP.Port;
 
     FIdSMTP.IOHandler := FIdSSLOpenSSL;
 
@@ -515,7 +550,7 @@ begin
   else
   begin
     Log('Defining encryption: None');
-    FIdSMTP.IOHandler := TIdIOHandler.MakeDefaultIOHandler(nil);
+    FIdSMTP.IOHandler := nil;
     FIdSMTP.UseTLS := UtNoTLSSupport;
   end;
 
@@ -600,7 +635,7 @@ begin
   try
     try
       Log('Sending email');
-      FidMessageBuilderHTML.FillMessage(FIdMessage);
+      FIdMessageBuilderHTML.FillMessage(FIdMessage);
       FIdMessage.SaveToStream(FMessageStream);
       FIdSMTP.Send(FIdMessage);
       Log('Email sent');
@@ -670,6 +705,8 @@ begin
     begin
       RW.BeginWrite;
       try
+        LMessage := '';
+
         try
           Send(ADisconnectAfterSending);
         except
@@ -703,13 +740,6 @@ begin
     except
       Log('Except: Disconnected with error');
     end;
-
-  if FSSL or FTLS then
-  begin
-    Log('UnLoading DLL');
-    UnLoadOpenSSLLibrary;
-    Log('UnLoaded DLL');
-  end;
 end;
 
 function TSendEmail.IsConnected: Boolean;
